@@ -4,6 +4,9 @@ import authConfig from "./auth.config";
 import { getUserById } from "./data/user";
 import { db } from "@/lib/db";
 import { UserRole } from "./lib/generated/prisma";
+import { getTwoFactorConfirmationByUserId } from "@/data/two-factor-confirmation";
+import { get } from "http";
+import { getAccountByUserId } from "./data/account";
 
 declare module "next-auth" {
   /**
@@ -14,6 +17,8 @@ declare module "next-auth" {
       /** The user's postal address. */
       address: string;
       role: "ADMIN" | "USER";
+      isTwoFactorEnabled: boolean;
+      isOAuth: boolean;
       /**
        * By default, TypeScript merges new interface properties and overwrites existing ones.
        * In this case, the default session user properties will be overwritten,
@@ -46,6 +51,22 @@ export const { auth, handlers, signIn, signOut } = NextAuth({
         return false;
       }
 
+      if (existingUser.isTwoFactorEnabled) {
+        const twoFactorConfirmation = await getTwoFactorConfirmationByUserId(
+          existingUser.id
+        );
+
+        console.log("2FA Confirmation:", twoFactorConfirmation);
+
+        if (!twoFactorConfirmation) {
+          return false;
+        }
+        await db.twoFactorConfirmation.deleteMany({
+          where: { userId: existingUser.id },
+        });
+        //Delete @FA confirmation after successful sign in
+      }
+
       return true;
     },
     async session({ session, token }) {
@@ -56,6 +77,16 @@ export const { auth, handlers, signIn, signOut } = NextAuth({
       if (token.role && session.user) {
         session.user.role = token.role as UserRole;
       }
+
+      if (session.user) {
+        session.user.isTwoFactorEnabled = token.isTwoFactorEnabled as boolean;
+      }
+
+      if (session.user) {
+        session.user.name = token.name;
+        session.user.email = token.email;
+        session.user.isOAuth = token.isOAuth as boolean;
+      }
       return session;
     },
     async jwt({ token, user }) {
@@ -64,7 +95,17 @@ export const { auth, handlers, signIn, signOut } = NextAuth({
       const existingUser = await getUserById(token.sub);
       if (!existingUser) return token;
 
+      const existingAccount = await getAccountByUserId(existingUser.id);
+
+      token.isOAuth = existingAccount
+        ? existingAccount.provider !== "credentials"
+        : false;
+
+      token.isOAuth = !!existingAccount;
+      token.name = existingUser.name;
+      token.email = existingUser.email;
       token.role = existingUser.role;
+      token.isTwoFactorEnabled = existingUser.isTwoFactorEnabled;
 
       return token;
     },
