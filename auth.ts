@@ -101,7 +101,6 @@ export const { auth, handlers, signIn, signOut } = NextAuth({
         ? existingAccount.provider !== "credentials"
         : false;
 
-      token.isOAuth = !!existingAccount;
       token.name = existingUser.name;
       token.email = existingUser.email;
       token.role = existingUser.role;
